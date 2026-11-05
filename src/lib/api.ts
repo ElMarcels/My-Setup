@@ -28,8 +28,12 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     const message =
       data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
         ? data.error
-        : 'No se pudo completar la solicitud.'
+        : `No se pudo completar la solicitud (HTTP ${response.status}). Comprueba que el servidor de la API esté en marcha.`
     throw new ApiError(response.status, message)
+  }
+
+  if (data === null) {
+    throw new ApiError(response.status, 'El servidor devolvió una respuesta inesperada.')
   }
 
   return data as T
@@ -64,7 +68,7 @@ export function uploadSetup(
       const message =
         payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
           ? payload.error
-          : 'No se pudo publicar el setup.'
+          : `No se pudo publicar el setup (HTTP ${xhr.status}). Comprueba que el servidor de la API esté en marcha.`
       reject(new ApiError(xhr.status, message))
     }
 
