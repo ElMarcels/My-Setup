@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { upload } from '@vercel/blob/client'
 import {
   AlertTriangle,
   Check,
@@ -20,7 +21,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
-import { ApiError, uploadSetup } from '@/lib/api'
+import { ApiError, createSetup } from '@/lib/api'
 import { useDocumentTitle } from '@/lib/hooks'
 import { cn, fileSize } from '@/lib/utils'
 import { Avatar } from '@/components/ui/Avatar'
@@ -28,8 +29,16 @@ import { Button, LinkButton } from '@/components/ui/Button'
 import { Field, TextArea, TextInput } from '@/components/ui/Field'
 
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']
+const EXTENSIONS: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'image/avif': '.avif',
+}
 const MAX_IMAGES = 8
 const MAX_BYTES = 15 * 1024 * 1024
+const MULTIPART_THRESHOLD = 4 * 1024 * 1024
 
 interface PickedImage {
   id: string
@@ -160,22 +169,44 @@ export function NewSetupPage() {
       return
     }
 
-    const formData = new FormData()
-    formData.append('title', title.trim())
-    formData.append('description', description.trim())
-    for (const image of images) {
-      formData.append('images', image.file, image.file.name)
-    }
-
     setSubmitting(true)
     setProgress(0)
 
     try {
-      const response = await uploadSetup(formData, setProgress)
+      const uploaded: { url: string }[] = []
+      const total = images.length
+
+      for (const [index, image] of images.entries()) {
+        const extension = EXTENSIONS[image.file.type] ?? ''
+        const blob = await upload(`setups/${user.id}/${image.id}${extension}`, image.file, {
+          access: 'public',
+          handleUploadUrl: '/api/blob/upload',
+          contentType: image.file.type,
+          multipart: image.file.size > MULTIPART_THRESHOLD,
+          onUploadProgress: (event) => {
+            setProgress((index + event.percentage / 100) / total)
+          },
+        })
+
+        uploaded.push({ url: blob.url })
+      }
+
+      setProgress(1)
+
+      const response = await createSetup({
+        title: title.trim(),
+        description: description.trim(),
+        images: uploaded,
+      })
+
       push('Setup publicado. El hilo está abierto.', 'success')
       navigate(`/setup/${response.id}`)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'No se pudo publicar el setup.')
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : 'No se pudieron subir las fotos. Revisa tu conexión e inténtalo de nuevo.',
+      )
       setSubmitting(false)
       setProgress(0)
     }

@@ -1,27 +1,37 @@
 import { randomBytes } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
-import { DatabaseSync } from 'node:sqlite'
-import { DATA_DIR, DB_PATH, UPLOADS_DIR } from './config'
+import postgres from 'postgres'
+import './config.js'
 
-mkdirSync(DATA_DIR, { recursive: true })
-mkdirSync(UPLOADS_DIR, { recursive: true })
+const connectionString = process.env.DATABASE_URL?.trim()
 
-export const db = new DatabaseSync(DB_PATH)
+if (!connectionString || connectionString === '[SENSITIVE]') {
+  throw new Error(
+    'Falta DATABASE_URL. Configura una base de datos PostgreSQL en DATABASE_URL (Neon en Vercel o una instancia local para desarrollo).',
+  )
+}
 
-db.exec(`
-  PRAGMA journal_mode = WAL;
-  PRAGMA foreign_keys = ON;
-  PRAGMA busy_timeout = 5000;
+export const sql = postgres(connectionString, {
+  max: process.env.VERCEL ? 1 : 10,
+  idle_timeout: 20,
+  connect_timeout: 10,
+  // Neon y otros poolers en modo transaction no admiten prepared statements.
+  prepare: false,
+  onnotice: () => {},
+})
 
+const SCHEMA = `
   CREATE TABLE IF NOT EXISTS users (
     id            TEXT PRIMARY KEY,
-    username      TEXT NOT NULL COLLATE NOCASE UNIQUE,
-    email         TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    username      TEXT NOT NULL,
+    email         TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     bio           TEXT NOT NULL DEFAULT '',
     avatar_color  TEXT NOT NULL DEFAULT 'lime',
     created_at    TEXT NOT NULL
   );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (LOWER(username));
+  CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_idx ON users (LOWER(email));
 
   CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
@@ -41,7 +51,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS setup_images (
     id         TEXT PRIMARY KEY,
     setup_id   TEXT NOT NULL REFERENCES setups(id) ON DELETE CASCADE,
-    filename   TEXT NOT NULL,
+    url        TEXT NOT NULL,
     position   INTEGER NOT NULL,
     created_at TEXT NOT NULL
   );
@@ -68,7 +78,23 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_comments_user ON comments(user_id);
   CREATE INDEX IF NOT EXISTS idx_likes_setup ON likes(setup_id);
   CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
-`)
+`
+
+let schemaPromise: Promise<void> | null = null
+
+export function ensureSchema(): Promise<void> {
+  if (!schemaPromise) {
+    schemaPromise = sql
+      .unsafe(SCHEMA)
+      .then(() => undefined)
+      .catch((error) => {
+        schemaPromise = null
+        throw error
+      })
+  }
+
+  return schemaPromise
+}
 
 export const nowIso = () => new Date().toISOString()
 

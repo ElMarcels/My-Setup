@@ -7,13 +7,38 @@ Cada publicación admite varias fotos y abre automáticamente un hilo de comenta
 ## Stack
 
 - React 19 + Vite 8 + Tailwind CSS 4
-- Express 5 + `node:sqlite` (SQLite nativo de Node)
+- Express 5 empaquetado como función serverless en Vercel
+- PostgreSQL (Neon en producción) con el cliente `postgres`
+- Vercel Blob para las imágenes
 - Sesiones propias con cookie `httpOnly` y contraseñas con bcrypt
 
 ## Requisitos
 
-- Node.js 22 o superior (usa `node:sqlite`)
+- Node.js 22 o superior
 - npm
+- PostgreSQL local para desarrollo (o una base remota)
+- Un Blob store de Vercel con su `BLOB_READ_WRITE_TOKEN`
+
+## Variables de entorno
+
+Crea un `.env.local` en la raíz:
+
+| Variable                | Obligatoria | Descripción                                                        |
+| ----------------------- | ----------- | ------------------------------------------------------------------ |
+| `DATABASE_URL`          | sí          | Cadena de conexión PostgreSQL. En Neon, la URL con pooling.         |
+| `BLOB_READ_WRITE_TOKEN` | sí          | Token de lectura/escritura del Blob store de Vercel.                |
+| `PORT`                  | no          | Puerto del servidor Express local. Por defecto `4000`.              |
+| `COOKIE_SECURE`         | no          | `1` para enviar la cookie solo por HTTPS.                           |
+| `TRUST_PROXY`           | no          | `1` si está detrás de un proxy inverso.                             |
+
+Ejemplo para desarrollo local:
+
+```bash
+DATABASE_URL=postgres://tu_usuario@localhost:5432/my_setup_dev
+BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
+```
+
+Las tablas se crean automáticamente al arrancar la API.
 
 ## Desarrollo
 
@@ -27,9 +52,9 @@ Esto arranca a la vez:
 - Web (Vite): <http://localhost:5173>
 - API (Express): <http://localhost:4000>
 
-Abre **la URL de la web**, no el archivo `dist/index.html`. Vite reenvía `/api` y `/media` al puerto 4000.
+Abre **la URL de la web**, no el archivo `dist/index.html`. Vite reenvía `/api` al puerto 4000. Las imágenes se suben directamente desde el navegador a Vercel Blob.
 
-## Producción
+## Producción local
 
 ```bash
 npm run build
@@ -38,32 +63,36 @@ npm start
 
 La web y la API se sirven desde el mismo origen: <http://localhost:4000>.
 
-> Si abres la carpeta `dist` con un servidor estático (Live Server, `python -m http.server`, etc.) las peticiones a `/api` no llegarán a Express y el registro fallará. Usa siempre `npm run dev` o `npm start`.
+## Despliegue en Vercel
+
+1. Importa el repositorio en Vercel (framework **Vite**).
+2. Añade un proyecto de **Neon Postgres** desde el Marketplace y conéctalo al proyecto. Vercel inyecta `DATABASE_URL`.
+3. Crea un **Blob store** y conéctalo al proyecto. Vercel inyecta `BLOB_READ_WRITE_TOKEN`.
+4. Despliega. `vercel.json` compila la web en `dist/` y expone Express mediante `api/[...path].ts`.
+
+No hace falta configurar el directorio de salida ni el comando de build: están definidos en `vercel.json`.
+
+### Subidas de imágenes
+
+Las fotos no pasan por la función de Vercel (límite de 4,5 MB por petición). El navegador pide un token a `/api/blob/upload` y sube el archivo directamente a Vercel Blob. Después, `POST /api/setups` guarda las URLs públicas en PostgreSQL.
 
 ## Datos
 
-- Base de datos SQLite: `data/mysetup.db`
-- Imágenes subidas: `data/uploads/`
+- Usuarios, setups, imágenes (URLs), comentarios y likes: PostgreSQL.
+- Archivos de imagen: Vercel Blob, bajo el prefijo `setups/`.
 
-Ambas rutas están excluidas de git. Para empezar de cero:
+Para vaciar una base de datos **local**:
 
 ```bash
 npm run db:reset
 ```
 
-## Variables de entorno
-
-| Variable       | Por defecto | Descripción                                      |
-| -------------- | ----------- | ------------------------------------------------ |
-| `PORT`         | `4000`      | Puerto del servidor Express                      |
-| `DATA_DIR`     | `./data`    | Carpeta de base de datos e imágenes              |
-| `COOKIE_SECURE`| desactivado | `1` para enviar la cookie solo por HTTPS         |
-| `TRUST_PROXY`  | desactivado | `1` si está detrás de un proxy inverso           |
+El script se niega a vaciar bases remotas salvo que se ejecute con `ALLOW_REMOTE_RESET=1`.
 
 ## Scripts
 
 - `npm run dev`: API con recarga + Vite
 - `npm run build`: compila la web en `dist/`
 - `npm start`: servidor de producción
-- `npm run typecheck`: comprueba TypeScript
-- `npm run db:reset`: borra la base de datos y las subidas
+- `npm run typecheck`: comprueba TypeScript (cliente y servidor)
+- `npm run db:reset`: vacía la base de datos local

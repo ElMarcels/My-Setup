@@ -6,3 +6,6 @@ data
 .DS_Store
 ._*
 *.log
+
+.vercel
+.env*

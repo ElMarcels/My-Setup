@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto'
 import type { Request, Response } from 'express'
-import type { AvatarColor, MeUser } from '@shared/types'
-import { COOKIE_SECURE, SESSION_COOKIE, SESSION_DAYS } from './config'
-import { db, nowIso } from './db'
+import type { AvatarColor, MeUser } from '../shared/types.js'
+import { COOKIE_SECURE, SESSION_COOKIE, SESSION_DAYS } from './config.js'
+import { nowIso, sql } from './db.js'
 
 export interface AuthUser extends MeUser {
   passwordHash?: string
@@ -39,15 +39,16 @@ export function mapUser(row: UserRow): AuthUser {
   }
 }
 
-export function createSession(res: Response, userId: string) {
+export async function createSession(res: Response, userId: string) {
   const token = randomBytes(32).toString('base64url')
   const createdAt = nowIso()
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86_400_000).toISOString()
 
-  db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(createdAt)
-  db.prepare(
-    'INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)',
-  ).run(hashToken(token), userId, createdAt, expiresAt)
+  await sql`DELETE FROM sessions WHERE expires_at <= ${createdAt}`
+  await sql`
+    INSERT INTO sessions (token_hash, user_id, created_at, expires_at)
+    VALUES (${hashToken(token)}, ${userId}, ${createdAt}, ${expiresAt})
+  `
 
   res.cookie(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -58,31 +59,30 @@ export function createSession(res: Response, userId: string) {
   })
 }
 
-export function destroySession(req: Request, res: Response) {
+export async function destroySession(req: Request, res: Response) {
   const token = req.cookies?.[SESSION_COOKIE]
   if (token) {
-    db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token))
+    await sql`DELETE FROM sessions WHERE token_hash = ${hashToken(token)}`
   }
   res.clearCookie(SESSION_COOKIE, { path: '/' })
 }
 
-export function readSession(req: Request): AuthUser | null {
+export async function readSession(req: Request): Promise<AuthUser | null> {
   const token = req.cookies?.[SESSION_COOKIE]
   if (!token) return null
 
-  const row = db
-    .prepare(
-      `SELECT u.* FROM sessions s
-       JOIN users u ON u.id = s.user_id
-       WHERE s.token_hash = ? AND s.expires_at > ?`,
-    )
-    .get(hashToken(token), nowIso()) as unknown as UserRow | undefined
+  const [row] = await sql<UserRow[]>`
+    SELECT u.* FROM sessions s
+    JOIN users u ON u.id = s.user_id
+    WHERE s.token_hash = ${hashToken(token)} AND s.expires_at > ${nowIso()}
+    LIMIT 1
+  `
 
   return row ? mapUser(row) : null
 }
 
-export const attachUser: import('express').RequestHandler = (req, _res, next) => {
-  req.user = readSession(req)
+export const attachUser: import('express').RequestHandler = async (req, _res, next) => {
+  req.user = await readSession(req)
   next()
 }
 

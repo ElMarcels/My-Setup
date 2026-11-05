@@ -28,7 +28,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     const message =
       data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
         ? data.error
-        : `No se pudo completar la solicitud (HTTP ${response.status}). Comprueba que el servidor de la API esté en marcha.`
+        : `No se pudo completar la solicitud (HTTP ${response.status}).`
     throw new ApiError(response.status, message)
   }
 
@@ -39,41 +39,15 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return data as T
 }
 
-export function uploadSetup(
-  formData: FormData,
-  onProgress: (value: number) => void,
-): Promise<{ id: string }> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest()
-    xhr.open('POST', '/api/setups')
-    xhr.withCredentials = true
+export interface CreateSetupInput {
+  title: string
+  description: string
+  images: { url: string }[]
+}
 
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) onProgress(event.loaded / event.total)
-    }
-
-    xhr.onload = () => {
-      let payload: unknown = null
-      try {
-        payload = JSON.parse(xhr.responseText)
-      } catch {
-        // Respuesta vacía o no JSON.
-      }
-
-      if (xhr.status >= 200 && xhr.status < 300 && payload && typeof payload === 'object') {
-        resolve(payload as { id: string })
-        return
-      }
-
-      const message =
-        payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
-          ? payload.error
-          : `No se pudo publicar el setup (HTTP ${xhr.status}). Comprueba que el servidor de la API esté en marcha.`
-      reject(new ApiError(xhr.status, message))
-    }
-
-    xhr.onerror = () => reject(new ApiError(0, 'Se perdió la conexión durante la subida.'))
-    xhr.onabort = () => reject(new ApiError(0, 'Subida cancelada.'))
-    xhr.send(formData)
+export function createSetup(input: CreateSetupInput): Promise<{ id: string }> {
+  return api<{ id: string }>('/api/setups', {
+    method: 'POST',
+    body: JSON.stringify(input),
   })
 }
