@@ -7,6 +7,7 @@ export interface PublicUser {
   username: string
   bio: string
   avatarColor: AvatarColor
+  avatarUrl: string | null
   createdAt: string
 }
 

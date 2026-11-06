@@ -27,8 +27,11 @@ const SCHEMA = `
     password_hash TEXT NOT NULL,
     bio           TEXT NOT NULL DEFAULT '',
     avatar_color  TEXT NOT NULL DEFAULT 'lime',
+    avatar_url    TEXT,
     created_at    TEXT NOT NULL
   );
+
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 
   CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (LOWER(username));
   CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_idx ON users (LOWER(email));

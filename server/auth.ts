@@ -15,6 +15,7 @@ export interface UserRow {
   password_hash: string
   bio: string
   avatar_color: AvatarColor
+  avatar_url: string | null
   created_at: string
 }
 
@@ -35,6 +36,7 @@ export function mapUser(row: UserRow): AuthUser {
     email: row.email,
     bio: row.bio,
     avatarColor: row.avatar_color,
+    avatarUrl: row.avatar_url,
     createdAt: row.created_at,
   }
 }

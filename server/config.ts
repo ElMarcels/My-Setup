@@ -25,6 +25,7 @@ export const COOKIE_SECURE = process.env.COOKIE_SECURE === '1' || IS_VERCEL
 export const MAX_IMAGES = 8
 export const MAX_IMAGE_BYTES = 15 * 1024 * 1024
 export const MAX_TOTAL_UPLOAD_BYTES = 60 * 1024 * 1024
+export const MAX_AVATAR_BYTES = 5 * 1024 * 1024
 
 export const ACCEPTED_IMAGE_TYPES = [
   'image/jpeg',

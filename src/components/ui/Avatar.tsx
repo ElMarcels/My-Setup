@@ -1,4 +1,4 @@
-import type { AvatarColor, PublicUser } from '@shared/types'
+import type { AvatarColor } from '@shared/types'
 import { AVATAR_PALETTE } from '@/lib/avatar'
 import { cn, initials } from '@/lib/utils'
 
@@ -11,8 +11,14 @@ const SIZES = {
   '2xl': 'h-28 w-28 rounded-2xl text-4xl',
 } as const
 
+interface AvatarUser {
+  username: string
+  avatarColor: AvatarColor
+  avatarUrl?: string | null
+}
+
 interface AvatarProps {
-  user: Pick<PublicUser, 'username' | 'avatarColor'> | { username: string; avatarColor: AvatarColor }
+  user: AvatarUser
   size?: keyof typeof SIZES
   className?: string
 }
@@ -24,16 +30,30 @@ export function Avatar({ user, size = 'md', className }: AvatarProps) {
     <span
       aria-hidden="true"
       className={cn(
-        'inline-flex shrink-0 select-none items-center justify-center font-mono font-bold uppercase tracking-tight',
+        'relative inline-flex shrink-0 select-none items-center justify-center overflow-hidden font-mono font-bold uppercase tracking-tight',
         SIZES[size],
         className,
       )}
-      style={{
-        backgroundImage: `linear-gradient(135deg, ${palette.from}, ${palette.to})`,
-        color: palette.text,
-      }}
+      style={
+        user.avatarUrl
+          ? undefined
+          : {
+              backgroundImage: `linear-gradient(135deg, ${palette.from}, ${palette.to})`,
+              color: palette.text,
+            }
+      }
     >
-      {initials(user.username)}
+      {user.avatarUrl ? (
+        <img
+          src={user.avatarUrl}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        initials(user.username)
+      )}
     </span>
   )
 }

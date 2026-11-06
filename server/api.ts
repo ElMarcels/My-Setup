@@ -14,6 +14,7 @@ import {
 import { createSession, destroySession, mapUser, requireAuth, type UserRow } from './auth.js'
 import {
   ACCEPTED_IMAGE_TYPES,
+  MAX_AVATAR_BYTES,
   MAX_IMAGES,
   MAX_IMAGE_BYTES,
 } from './config.js'
@@ -53,6 +54,7 @@ interface SetupRow {
   username: string
   author_bio: string
   avatar_color: AvatarColor
+  avatar_url: string | null
   author_created_at: string
   image_count: number
   like_count: number
@@ -70,6 +72,7 @@ interface CommentRow {
   username: string
   author_bio: string
   avatar_color: AvatarColor
+  avatar_url: string | null
   author_created_at: string
   owner_id: string
 }
@@ -90,6 +93,7 @@ function setupSelect(viewerId: string) {
       u.username,
       u.bio AS author_bio,
       u.avatar_color,
+      u.avatar_url,
       u.created_at AS author_created_at,
       (SELECT COUNT(*)::int FROM setup_images i WHERE i.setup_id = s.id) AS image_count,
       (SELECT COUNT(*)::int FROM likes l WHERE l.setup_id = s.id) AS like_count,
@@ -112,6 +116,7 @@ function mapSetupRow(row: SetupRow): SetupSummary {
       username: row.username,
       bio: row.author_bio,
       avatarColor: row.avatar_color,
+      avatarUrl: row.avatar_url,
       createdAt: row.author_created_at,
     },
     cover: row.cover,
@@ -136,6 +141,7 @@ function mapCommentRow(row: CommentRow, viewerId: string | null): Comment {
       username: row.username,
       bio: row.author_bio,
       avatarColor: row.avatar_color,
+      avatarUrl: row.avatar_url,
       createdAt: row.author_created_at,
     },
     canDelete: Boolean(viewerId && (viewerId === row.comment_user_id || viewerId === row.owner_id)),
@@ -157,6 +163,26 @@ function validateImageUrl(value: string): string {
 
   if (!url.pathname.startsWith('/setups/')) {
     throw new HttpError(400, 'Una de las imágenes tiene una ruta no permitida.')
+  }
+
+  return url.toString()
+}
+
+function validateAvatarUrl(value: string): string {
+  let url: URL
+
+  try {
+    url = new URL(value)
+  } catch {
+    throw new HttpError(400, 'La foto de perfil no tiene una URL válida.')
+  }
+
+  if (url.protocol !== 'https:' || !url.hostname.endsWith(BLOB_HOST_SUFFIX)) {
+    throw new HttpError(400, 'La foto de perfil no pertenece al almacenamiento de la plataforma.')
+  }
+
+  if (!url.pathname.startsWith('/avatars/')) {
+    throw new HttpError(400, 'La foto de perfil tiene una ruta no permitida.')
   }
 
   return url.toString()
@@ -258,6 +284,7 @@ apiRouter.patch('/me', requireAuth, async (req, res) => {
     z.object({
       bio: z.string().trim().max(160, 'La bio no puede superar los 160 caracteres.').optional(),
       avatarColor: z.enum(AVATAR_COLORS).optional(),
+      avatarUrl: z.string().max(2048).nullable().optional(),
     }),
     req.body,
   )
@@ -265,11 +292,25 @@ apiRouter.patch('/me', requireAuth, async (req, res) => {
   const user = req.user!
   const bio = body.bio ?? user.bio
   const avatarColor = body.avatarColor ?? user.avatarColor
+  const avatarUrl =
+    body.avatarUrl === undefined
+      ? user.avatarUrl
+      : body.avatarUrl === null
+        ? null
+        : validateAvatarUrl(body.avatarUrl)
 
-  await sql`UPDATE users SET bio = ${bio}, avatar_color = ${avatarColor} WHERE id = ${user.id}`
+  await sql`
+    UPDATE users
+    SET bio = ${bio}, avatar_color = ${avatarColor}, avatar_url = ${avatarUrl}
+    WHERE id = ${user.id}
+  `
+
+  if (user.avatarUrl && user.avatarUrl !== avatarUrl) {
+    await deleteBlobs([user.avatarUrl])
+  }
 
   res.json({
-    user: { ...user, bio, avatarColor } satisfies MeUser,
+    user: { ...user, bio, avatarColor, avatarUrl } satisfies MeUser,
   })
 })
 
@@ -293,13 +334,15 @@ apiRouter.post('/blob/upload', requireAuth, async (req, res) => {
       body,
       request: req,
       onBeforeGenerateToken: async (pathname) => {
-        if (!pathname.startsWith('setups/')) {
+        const isAvatar = pathname.startsWith('avatars/')
+
+        if (!isAvatar && !pathname.startsWith('setups/')) {
           throw new HttpError(400, 'Ruta de subida no válida.')
         }
 
         return {
           allowedContentTypes: ACCEPTED_IMAGE_TYPES,
-          maximumSizeInBytes: MAX_IMAGE_BYTES,
+          maximumSizeInBytes: isAvatar ? MAX_AVATAR_BYTES : MAX_IMAGE_BYTES,
           addRandomSuffix: true,
         }
       },
@@ -383,7 +426,7 @@ apiRouter.get('/setups/:id', async (req, res) => {
   const commentRows = await sql<CommentRow[]>`
     SELECT
       c.id, c.body, c.created_at, c.user_id AS comment_user_id,
-      u.id AS author_id, u.username, u.bio AS author_bio, u.avatar_color,
+      u.id AS author_id, u.username, u.bio AS author_bio, u.avatar_color, u.avatar_url,
       u.created_at AS author_created_at,
       s.user_id AS owner_id
     FROM comments c
@@ -539,6 +582,7 @@ apiRouter.post('/setups/:id/comments', requireAuth, commentLimiter, async (req, 
       username: user.username,
       bio: user.bio,
       avatarColor: user.avatarColor,
+      avatarUrl: user.avatarUrl,
       createdAt: user.createdAt,
     },
     canDelete: true,
@@ -599,6 +643,7 @@ apiRouter.get('/users/:username', async (req, res) => {
       username: user.username,
       bio: user.bio,
       avatarColor: user.avatar_color,
+      avatarUrl: user.avatar_url,
       createdAt: user.created_at,
     },
     stats: {

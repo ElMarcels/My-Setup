@@ -2,7 +2,7 @@
 
 Comparte tu escritorio, abre un hilo y descubre los espacios de la comunidad.
 
-Cada publicación admite varias fotos y abre automáticamente un hilo de comentarios sin límite de mensajes. Para publicar o comentar hace falta una cuenta; el feed y los perfiles son públicos.
+Cada publicación admite varias fotos y abre automáticamente un hilo de comentarios sin límite de mensajes. Para publicar o comentar hace falta una cuenta; el feed y los perfiles son públicos. Cada cuenta puede añadir una foto de perfil desde sus ajustes.
 
 ## Stack
 
@@ -79,7 +79,7 @@ Las fotos no pasan por la función de Vercel (límite de 4,5 MB por petición). 
 ## Datos
 
 - Usuarios, setups, imágenes (URLs), comentarios y likes: PostgreSQL.
-- Archivos de imagen: Vercel Blob, bajo el prefijo `setups/`.
+- Archivos de imagen: Vercel Blob, bajo los prefijos `setups/` (publicaciones) y `avatars/` (fotos de perfil).
 
 Para vaciar una base de datos **local**:
 

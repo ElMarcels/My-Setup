@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Check, LogOut, Save } from 'lucide-react'
+import { upload } from '@vercel/blob/client'
+import { Camera, Check, LogOut, Save, Trash2 } from 'lucide-react'
 import { AVATAR_COLORS, type AvatarColor, type AuthResponse } from '@shared/types'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
@@ -12,19 +13,68 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { Field, TextArea } from '@/components/ui/Field'
 
+const ACCEPTED_AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']
+const AVATAR_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'image/avif': '.avif',
+}
+const MAX_AVATAR_BYTES = 5 * 1024 * 1024
+
 export function SettingsPage() {
   useDocumentTitle('Ajustes')
   const { user, logout, refresh } = useAuth()
   const { push } = useToast()
   const navigate = useNavigate()
+  const avatarInputRef = useRef<HTMLInputElement>(null)
 
   const [bio, setBio] = useState(user?.bio ?? '')
   const [avatarColor, setAvatarColor] = useState<AvatarColor>(user?.avatarColor ?? 'lime')
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(user?.avatarUrl ?? null)
+  const [avatarFile, setAvatarFile] = useState<File | null>(null)
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [leaving, setLeaving] = useState(false)
 
+  useEffect(() => {
+    return () => {
+      if (avatarPreview) URL.revokeObjectURL(avatarPreview)
+    }
+  }, [avatarPreview])
+
   if (!user) return null
+
+  const previewUrl = avatarPreview ?? avatarUrl
+
+  const handleAvatarFile = (files: FileList | null) => {
+    const file = files?.[0]
+    if (avatarInputRef.current) avatarInputRef.current.value = ''
+    if (!file) return
+
+    if (!ACCEPTED_AVATAR_TYPES.includes(file.type)) {
+      setError('La foto debe ser JPG, PNG, WebP, GIF o AVIF.')
+      return
+    }
+
+    if (file.size > MAX_AVATAR_BYTES) {
+      setError('La foto de perfil no puede superar los 5 MB.')
+      return
+    }
+
+    setAvatarFile(file)
+    setAvatarPreview(URL.createObjectURL(file))
+    setError(null)
+  }
+
+  const removeAvatar = () => {
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview)
+    setAvatarPreview(null)
+    setAvatarFile(null)
+    setAvatarUrl(null)
+  }
 
   const handleSave = async (event: FormEvent) => {
     event.preventDefault()
@@ -32,10 +82,33 @@ export function SettingsPage() {
     setError(null)
 
     try {
+      let nextAvatarUrl = avatarUrl
+
+      if (avatarFile) {
+        const extension = AVATAR_EXTENSIONS[avatarFile.type] ?? ''
+        const blob = await upload(
+          `avatars/${user.id}/${crypto.randomUUID()}${extension}`,
+          avatarFile,
+          {
+            access: 'public',
+            handleUploadUrl: '/api/blob/upload',
+            contentType: avatarFile.type,
+            multipart: false,
+          },
+        )
+        nextAvatarUrl = blob.url
+      }
+
       await api<AuthResponse>('/api/me', {
         method: 'PATCH',
-        body: JSON.stringify({ bio: bio.trim(), avatarColor }),
+        body: JSON.stringify({ bio: bio.trim(), avatarColor, avatarUrl: nextAvatarUrl }),
       })
+
+      if (avatarPreview) URL.revokeObjectURL(avatarPreview)
+      setAvatarPreview(null)
+      setAvatarFile(null)
+      setAvatarUrl(nextAvatarUrl)
+
       await refresh()
       push('Perfil actualizado.', 'success')
     } catch (err) {
@@ -70,14 +143,58 @@ export function SettingsPage() {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_290px] lg:gap-8">
         <form onSubmit={handleSave} className="rounded-xl border border-line bg-surface/70 p-5 sm:p-6">
-          <div className="flex items-center gap-3 border-b border-line pb-5">
-            <Avatar user={{ username: user.username, avatarColor }} size="xl" />
-            <div className="min-w-0">
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept={ACCEPTED_AVATAR_TYPES.join(',')}
+            onChange={(event) => handleAvatarFile(event.target.files)}
+            className="sr-only"
+            aria-label="Seleccionar foto de perfil"
+          />
+
+          <div className="flex flex-col gap-4 border-b border-line pb-5 sm:flex-row sm:items-center">
+            <div className="relative shrink-0 self-start">
+              <Avatar
+                user={{ username: user.username, avatarColor, avatarUrl: previewUrl }}
+                size="xl"
+              />
+              <button
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                className="absolute -bottom-1.5 -right-1.5 grid h-7 w-7 place-items-center rounded-full border border-line bg-panel text-dim shadow-lg shadow-black/40 transition hover:border-line-bright hover:text-acid"
+                aria-label="Cambiar foto de perfil"
+              >
+                <Camera size={13} />
+              </button>
+            </div>
+
+            <div className="min-w-0 flex-1">
               <p className="truncate font-mono text-base text-paper">@{user.username}</p>
               <p className="truncate text-[12px] text-faint">{user.email}</p>
               <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.12em] text-faint">
                 cuenta creada el {formatLongDate(user.createdAt)}
               </p>
+
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  className="rounded border border-line bg-panel px-2 py-1 font-mono text-[9px] uppercase tracking-[0.1em] text-dim transition hover:border-line-bright hover:text-paper"
+                >
+                  cambiar foto
+                </button>
+                {previewUrl ? (
+                  <button
+                    type="button"
+                    onClick={removeAvatar}
+                    className="inline-flex items-center gap-1 rounded border border-line bg-panel px-2 py-1 font-mono text-[9px] uppercase tracking-[0.1em] text-dim transition hover:border-danger/40 hover:text-danger"
+                  >
+                    <Trash2 size={10} />
+                    quitar
+                  </button>
+                ) : null}
+                <span className="font-mono text-[9px] text-faint/70">JPG · PNG · WebP · 5 MB</span>
+              </div>
             </div>
           </div>
 
@@ -128,6 +245,11 @@ export function SettingsPage() {
                   )
                 })}
               </div>
+              {previewUrl ? (
+                <p className="font-mono text-[9px] leading-relaxed text-faint">
+                  Si tienes foto, el color queda como respaldo si la quitas.
+                </p>
+              ) : null}
             </div>
 
             {error ? (
